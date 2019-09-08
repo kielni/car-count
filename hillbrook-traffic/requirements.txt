@@ -1,5 +1,4 @@
 python-dateutil==2.6.1
 keen==0.5.1
 xmltodict==0.11.0
-ics==0.5
 requests==2.18.4

@@ -5,13 +5,12 @@ import time
 
 import boto3
 from dateutil import tz
-from ics import Calendar
 import keen
 import requests
 import xmltodict
 
 
-COLLECTION = 'traffic-test'
+COLLECTION = 'traffic'
 
 """
     Get data from SNAPS for 15 minute period from 20 minutes ago to 5 minutes ago,

@@ -8,18 +8,19 @@ provider:
   memorySize: 128
   timeout: 30
   region: us-west-2
-  role: arn:aws:iam::160984044806:role/service-role/lambda_basic_execution
+  role: ${env:LAMBDA_ROLE_ARN}
+
   iamRoleStatements:
     - Effect: Allow
       Action:
        - logs:CreateLogGroup
        - logs:CreateLogStream
        - logs:PutLogEvents
-      Resource: 'arn:aws:logs:us-west-2:160984044806:*'
+      Resource: ${env:LOGS_ARN}
     - Effect: Allow
       Action:
         - Allow: sns:Publish
-      Resource: 'arn:aws:sns:us-west-2:160984044806:car-count-alert'
+      Resource: ${env:ALERT_ARN}
 
   environment:
     STATIONS: ${env:STATIONS}
@@ -33,7 +34,16 @@ provider:
 
 package:
   exclude:
+      - node_modules/**
       - init.sh
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+      # to make serverless work with pyenv
+      pythonBin: python
 
 functions:
   collect:
