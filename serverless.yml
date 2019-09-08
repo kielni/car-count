@@ -49,5 +49,6 @@ functions:
   collect:
     handler: handler.collect
     name: hillbook-traffic
+    description: Get traffic data from SNAPS and send to Keen (managed through serverless)
     events:
       - schedule: cron(10,25,40,55 0-4,12-23 ? * * *)
