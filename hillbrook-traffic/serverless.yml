@@ -1,0 +1,43 @@
+service: hillbrook-traffic
+app: hillbrook-traffic
+org: kielni
+
+provider:
+  name: aws
+  runtime: python3.7
+  memorySize: 128
+  timeout: 30
+  region: us-west-2
+  role: arn:aws:iam::160984044806:role/service-role/lambda_basic_execution
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+       - logs:CreateLogGroup
+       - logs:CreateLogStream
+       - logs:PutLogEvents
+      Resource: 'arn:aws:logs:us-west-2:160984044806:*'
+    - Effect: Allow
+      Action:
+        - Allow: sns:Publish
+      Resource: 'arn:aws:sns:us-west-2:160984044806:car-count-alert'
+
+  environment:
+    STATIONS: ${env:STATIONS}
+    CALENDAR_URL: ${env:CALENDAR_URL}
+    SNAPS_PASSWORD: ${env:SNAPS_PASSWORD}
+    SNAPS_USERNAME: ${env:SNAPS_USERNAME}
+    KEEN_PROJECT_ID: ${env:KEEN_PROJECT_ID}
+    KEEN_WRITE_KEY: ${env:KEEN_WRITE_KEY}
+    KEEN_READ_KEY: ${env:KEEN_READ_KEY}
+    ALERT_ARN: ${env:ALERT_ARN}
+
+package:
+  exclude:
+      - init.sh
+
+functions:
+  collect:
+    handler: handler.collect
+    name: hillbook-traffic
+    events:
+      - schedule: cron(10,25,40,55 0-4,12-23 ? * * *)
