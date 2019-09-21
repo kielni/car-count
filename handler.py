@@ -51,22 +51,33 @@ def get_counts(station, start_ts, period):
 
 
 
-def _prediction(hour, observed):
+def _prediction(now_pt: int, observed: int) -> int:
     """
-    linear regression with Aug 2018-Sep 2019 data
-    4pm: coeff=[1.01678193] intercept=44.664357451929504
-        score=0.7009697101722595
-    as of 5pm: coeff=[1.00879315] intercept=16.994550748946494
-        score=0.8602885443570323
+    4pm and 5pm:
+        linear regression with Aug 2018-Sep 2019 data
+        4pm: coeff=[1.01649594] intercept=44.91931545628796 score=0.6930983959871696
+        5pm: coeff=[1.00662224] intercept=17.955353264565133 score=0.8480492171160054
+    1pm
     """
+    hour = now_pt.hour
+    if hour in [16, 17]:
     # (coef, intercept)
-    calc = {
-        16: (1.01678193, 44.664357451929504),
-        17: (1.00879315, 16.994550748946494)
+        calc = {
+            16: (1.01649594, 44.91931545628796),
+            17: (1.00662224, 17.955353264565133)
+        }
+        return int(round(float(observed) * calc[hour][0] + calc[hour][1]))
+    # 1pm Mon-Wed: day: threshold
+    by_day = {
+        0: 222,
+        1: 220,
+        2: 211,
     }
-    if hour not in calc:
+    weekday = now_pt.weekday()
+    if weekday not in by_day:
         return 0
-    return int(round(float(observed) * calc[hour][0] + calc[hour][1]))
+    # high or not; not a specific prediction
+    return 401 if observed >= by_day[weekday] else 0
 
 
 def collect(event, context):
@@ -100,9 +111,14 @@ def collect(event, context):
         'time': datetime.now(tz.gettz('America/Los_Angeles')).strftime('%H%M%S'),
     }
 
-    # predictions M-F 4pm and 5pm
+    # predictions M-F at 4pm and 5pm, M-W at 1pm
     alert = {}
-    predict = now_pt.hour in [16, 17] and now_pt.weekday() < 5 and now_pt.minute < 15
+    predict = False
+    if now_pt.weekday() < 5 and now_pt.minute < 15:
+        predict = now_pt.hour in [16, 17]
+        # 1pm prediction on Mon-Wed (0-2)
+        if now_pt.hour == 13 and now_pt.weekday() in [0, 1, 2]:
+            predict = True
     alert_key = 'EntryA'
 
     # get data from SNAPS
@@ -124,7 +140,7 @@ def collect(event, context):
         if day[alert_key] < 150:
             print('actual %s; not a school day' % day[alert_key])
             continue
-        predicted = _prediction(now_pt.hour, day[alert_key])
+        predicted = _prediction(now_pt, day[alert_key])
         if not predicted:
             print('no prediction available for %s %s' % (now_pt.hour, day))
             continue
@@ -143,11 +159,19 @@ def collect(event, context):
 
     # send alert if > 400
     if alert.get('predicted', 0) > 400:
-        subject = 'WARNING: high car count: %s predicted as of %s' % (
-            alert['predicted'], alert['key'])
-        message = 'WARNING: %s cars measured at %s as of %s. %s cars predicted.' % (
-            alert['actual'], alert['key'], now_pt.strftime('%-I:%M%p'),
-            alert['predicted'])
+        # early prediction: high or not
+        if now_pt.hour == 13:
+            subject = 'WARNING: high car count predicted as of %s' % (
+                alert['key'])
+            message = 'WARNING: %s cars measured at %s as of %s. Over 400 entries predicted.' % (
+                alert['actual'], alert['key'], now_pt.strftime('%-I:%M%p'))
+        else:
+            subject = 'WARNING: high car count: %s predicted as of %s' % (
+                alert['predicted'], alert['key'])
+            message = 'WARNING: %s cars measured at %s as of %s. %s cars predicted.' % (
+                alert['actual'], alert['key'], now_pt.strftime('%-I:%M%p'),
+                alert['predicted'])
+
         print(boto3.client('sns').publish(
             TopicArn=os.environ['ALERT_ARN'],
             Message=message, Subject=subject))
