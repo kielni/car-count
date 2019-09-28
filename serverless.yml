@@ -46,6 +46,7 @@ custom:
   pythonRequirements:
       # to make serverless work with pyenv
       pythonBin: python
+      dockerizePip: true
 
 functions:
   collect:
