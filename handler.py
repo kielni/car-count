@@ -170,15 +170,11 @@ def collect_to_sheet(event, context):
     day_start_ts = int(time.mktime(day_start.astimezone(tz.gettz('UTC')).timetuple()))
     # seconds between start of day and 5 minutes ago
     day_period = now_pt.hour*3600 + now_pt.minute*60 + now_pt.second - 5*60
-    # sheet layout:
-    # date  total   7:10 AM 7:25 AM 7:40 AM
+    # sheet columns: date total 7:10 AM 7:25 AM 7:40 AM
     # get column for this data point
-    '''
     if now_pt.hour < 7 or now_pt.hour > 18:
         print(now_pt, ' outside data collection range')
         return
-    '''
-
     # predictions M-F at 4pm and 5pm, M-W at 1pm
     alert = {}
     predict = False
