@@ -33,6 +33,8 @@ Install serverless and Python dependencies packaging plugin:
   - [serverless](https://serverless.com/framework/docs/providers/aws/guide/quick-start/)
   - install `serverless-python-requirement`: `sls plugin install -n serverless-python-requirements`
 
+Share Google Sheet with service account (user@domain.iam.gserviceaccount.com)
+
 ## deploy
 
 `sls deploy`

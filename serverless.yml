@@ -31,6 +31,8 @@ provider:
     KEEN_WRITE_KEY: ${env:KEEN_WRITE_KEY}
     KEEN_READ_KEY: ${env:KEEN_READ_KEY}
     ALERT_ARN: ${env:ALERT_ARN}
+    GOOGLE_SERVICE_ACCOUNT: ${ssm:/hillbrook-traffic-service-account~true}
+    GOOGLE_SHEET_ID: ${env:GOOGLE_SHEET_ID}
 
 package:
   exclude:
@@ -50,5 +52,12 @@ functions:
     handler: handler.collect
     name: hillbook-traffic
     description: Get traffic data from SNAPS and send to Keen (managed through serverless)
+    events:
+      - schedule: cron(10,25,40,55 0-4,12-23 ? * * *)
+
+  collect-sheet:
+    handler: handler.collect_to_sheet
+    name: hillbook-traffic-sheet
+    description: Get traffic data from SNAPS and send to Google Sheet (managed through serverless)
     events:
       - schedule: cron(10,25,40,55 0-4,12-23 ? * * *)
