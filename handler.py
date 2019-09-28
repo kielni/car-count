@@ -113,22 +113,24 @@ def update_sheet(values: dict, now_pt: datetime):
     client = gspread.authorize(credentials)
     ss = client.open_by_key(os.environ['GOOGLE_SHEET_ID'])
 
-    # 4 per hour starting at 7am, plus 2 for date and total
-    col = (now_pt.hour - 7) * 4 + int(now_pt.minute / 15) + 2
+    # 4 per hour starting at 5am, plus 2 for date and total
+    col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
     # sheets: EntryA, EntryB, prediction
     worksheets = {'EntryA': 0, 'EntryB': 1, 'prediction': 2}
     mdy = now_pt.strftime('%-m/%-d/%y')
+    prefix = {0: '', 1: 'A', 2: 'B'} # A-Z, AA-AZ, BA-BZ
     for key in ['EntryA', 'EntryB']:
         val = values['entry'][key]
         sheet = ss.get_worksheet(worksheets[key])
         latest = date_parser.parse(sheet.range('A2:A2')[0].value).date()
         if now_pt.date() == latest:
             # row for this day already exists; update cell
-            print('%s: updating row=2 col=%s: %s' % (sheet.title, col, val))
-            sheet.update_acell('%s2' % chr(65 + col), val)
+            cell = '%s%s2' % (prefix[int(col / 26)], chr(65 + col % 26))
+            print('%s: updating %s = %s' % (sheet.title, cell, val))
+            sheet.update_acell(cell, val)
         else:
             # add row with date and total
-            print('%s: inserting row=2: %s' % (sheet.title, val))
+            print('%s: inserting %s %s' % (sheet.title, mdy, val))
             sheet.insert_row([mdy, '=sum(c2:au2)', val], index=2, value_input_option='USER_ENTERED')
 
     # use EntryA for predictions
@@ -170,9 +172,9 @@ def collect_to_sheet(event, context):
     day_start_ts = int(time.mktime(day_start.astimezone(tz.gettz('UTC')).timetuple()))
     # seconds between start of day and 5 minutes ago
     day_period = now_pt.hour*3600 + now_pt.minute*60 + now_pt.second - 5*60
-    # sheet columns: date total 7:10 AM 7:25 AM 7:40 AM
+    # sheet columns: date total 5:10 AM 5:25 AM 5:40 AM
     # get column for this data point
-    if now_pt.hour < 7 or now_pt.hour > 18:
+    if now_pt.hour < 5 or now_pt.hour > 18:
         print(now_pt, ' outside data collection range')
         return
     # predictions M-F at 4pm and 5pm, M-W at 1pm
@@ -222,9 +224,8 @@ def collect_to_sheet(event, context):
             'actual': day[alert_key],
             'predicted': predicted
         }
-
     # send to sheet
-    print('values=%s' % values)
+    update_sheet(values, now_pt)
 
 
 def collect(event, context):
