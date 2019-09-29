@@ -21,6 +21,10 @@ provider:
       Action:
         - Allow: sns:Publish
       Resource: ${env:ALERT_ARN}
+    - Effect: Allow
+      Action:
+        - ssm:GetParameter
+      Resource: ${env:PARAMS_ARN}
 
   environment:
     STATIONS: ${env:STATIONS}
@@ -31,7 +35,6 @@ provider:
     KEEN_WRITE_KEY: ${env:KEEN_WRITE_KEY}
     KEEN_READ_KEY: ${env:KEEN_READ_KEY}
     ALERT_ARN: ${env:ALERT_ARN}
-    GOOGLE_SERVICE_ACCOUNT: ${ssm:/hillbrook-traffic-service-account~true}
     GOOGLE_SHEET_ID: ${env:GOOGLE_SHEET_ID}
 
 package:

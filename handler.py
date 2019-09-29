@@ -108,7 +108,9 @@ def update_sheet(values: dict, now_pt: datetime):
     # setup sheet
     scope = ['https://spreadsheets.google.com/feeds',
              'https://www.googleapis.com/auth/drive']
-    creds = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT'])
+    ssm = boto3.client('ssm')
+    param = ssm.get_parameter(Name='hillbrook-traffic-service-account', WithDecryption=True)
+    creds = json.loads(param['Parameter']['Value'])
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
     client = gspread.authorize(credentials)
     ss = client.open_by_key(os.environ['GOOGLE_SHEET_ID'])
@@ -116,7 +118,7 @@ def update_sheet(values: dict, now_pt: datetime):
     # 4 per hour starting at 5am, plus 2 for date and total
     col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
     # sheets: EntryA, EntryB, prediction
-    worksheets = {'EntryA': 0, 'EntryB': 1, 'prediction': 2}
+    worksheets = {'EntryA': 2, 'EntryB': 3, 'prediction': 1}
     mdy = now_pt.strftime('%-m/%-d/%y')
     prefix = {0: '', 1: 'A', 2: 'B'} # A-Z, AA-AZ, BA-BZ
     for key in ['EntryA', 'EntryB']:
@@ -154,8 +156,10 @@ def update_sheet(values: dict, now_pt: datetime):
     else:
         # add row with date and total
         print('prediction: inserting row=2: %s' % (val))
-        sheet.insert_row([mdy, '=EntryA!B2', prediction['actual'], prediction['predicted']],
-                         index=2, value_input_option='USER_ENTERED')
+        sheet.insert_row([
+            mdy, '=VLOOKUP(A2, EntryA!A:B, 2, FALSE)',
+            prediction['actual'], prediction['predicted']],
+            index=2, value_input_option='USER_ENTERED')
 
 
 def collect_to_sheet(event, context):
