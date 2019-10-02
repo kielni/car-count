@@ -34,15 +34,29 @@ COLLECTION = 'traffic'
 SNAPS_URL = 'https://satts11.sensysnetworks.net/snaps/dataservice/stats.xml?userName={username}&password={password}&startTime={start_ts}&period={period}&locationGroup={station}'
 
 
+def get_param(name):
+    ssm = boto3.client('ssm')
+    param = ssm.get_parameter(Name=name, WithDecryption=True)
+    return param['Parameter']['Value']
+
+
 def get_counts(station, start_ts, period):
-    url = SNAPS_URL.format(username=os.environ['SNAPS_USERNAME'],
-                           password=os.environ['SNAPS_PASSWORD'],
+    url = SNAPS_URL.format(username=get_param('SNAPS_USERNAME'),
+                           password=get_param('SNAPS_PASSWORD'),
                            start_ts=start_ts, period=period,
                            station=station)
     resp = requests.get(url, verify=False)
     data = xmltodict.parse(resp.text)
     if 'statistics' not in data:
         print('error: bad data: %s' % data)
+        # notify once an hour during school hours
+        now_pt = datetime.now(tz.gettz('America/Los_Angeles'))
+        if now_pt.minute < 15 and now_pt.hour >= 7 and now_pt.hour <= 17:
+            print(boto3.client('sns').publish(
+                TopicArn=os.environ['ALERT_ARN'],
+                Message='received bad data from SNAPS:\n\n%s' % resp.text,
+                Subject='error loading traffic data'))
+
         return {}
 
     values = {}
@@ -108,21 +122,19 @@ def update_sheet(values: dict, now_pt: datetime):
     # setup sheet
     scope = ['https://spreadsheets.google.com/feeds',
              'https://www.googleapis.com/auth/drive']
-    ssm = boto3.client('ssm')
-    param = ssm.get_parameter(Name='hillbrook-traffic-service-account', WithDecryption=True)
-    creds = json.loads(param['Parameter']['Value'])
+    creds = json.loads(get_param('hillbrook-traffic-service-account'))
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
     client = gspread.authorize(credentials)
     ss = client.open_by_key(os.environ['GOOGLE_SHEET_ID'])
 
     # 4 per hour starting at 5am, plus 2 for date and total
     col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
-    # sheets: EntryA, EntryB, prediction
+    # sheets: display, prediction, EntryA, EntryB
     worksheets = {'EntryA': 2, 'EntryB': 3, 'prediction': 1}
     mdy = now_pt.strftime('%-m/%-d/%y')
     prefix = {0: '', 1: 'A', 2: 'B'} # A-Z, AA-AZ, BA-BZ
     for key in ['EntryA', 'EntryB']:
-        val = values['entry'][key]
+        val = max(0, values['entry'][key])
         sheet = ss.get_worksheet(worksheets[key])
         latest = date_parser.parse(sheet.range('A2:A2')[0].value).date()
         if now_pt.date() == latest:
@@ -133,7 +145,9 @@ def update_sheet(values: dict, now_pt: datetime):
         else:
             # add row with date and total
             print('%s: inserting %s %s' % (sheet.title, mdy, val))
-            sheet.insert_row([mdy, '=sum(c2:au2)', val], index=2, value_input_option='USER_ENTERED')
+            row = [mdy, '=sum(c2:bf2)'] + ['']*56
+            row[col] = val
+            sheet.insert_row(row, index=2, value_input_option='USER_ENTERED')
 
     # use EntryA for predictions
     # time, actual, predicted
@@ -176,7 +190,7 @@ def collect_to_sheet(event, context):
     day_start_ts = int(time.mktime(day_start.astimezone(tz.gettz('UTC')).timetuple()))
     # seconds between start of day and 5 minutes ago
     day_period = now_pt.hour*3600 + now_pt.minute*60 + now_pt.second - 5*60
-    # sheet columns: date total 5:10 AM 5:25 AM 5:40 AM
+    # sheet columns: date total 5:10 AM 5:25 AM 5:40 AM..
     # get column for this data point
     if now_pt.hour < 5 or now_pt.hour > 18:
         print(now_pt, ' outside data collection range')
@@ -233,9 +247,9 @@ def collect_to_sheet(event, context):
 
 
 def collect(event, context):
-    keen.project_id = os.environ['KEEN_PROJECT_ID']
-    keen.write_key = os.environ['KEEN_WRITE_KEY']
-    keen.read_key = os.environ['KEEN_READ_KEY']
+    keen.project_id = get_param('KEEN_PROJECT_ID')
+    keen.write_key = get_param('KEEN_WRITE_KEY')
+    keen.read_key = get_param('KEEN_READ_KEY')
     print('event=', event)
 
     # the same rule can be triggered more than once for a single event or scheduled time
@@ -313,23 +327,5 @@ def collect(event, context):
 
 
 if __name__ == '__main__':
-    data = {
-      "period": 900,
-      "exit": {
-        "ExitA": 11,
-        "ExitB": 11
-      },
-      "startTime": 1569629146,
-      "time": "172546",
-      "entry": {
-        "EntryB": 11,
-        "EntryA": 13
-      },
-      "EntryA": {
-        "prediction": {
-            "actual": 220,
-            "predicted": 410,
-        }
-      }
-    }
-    update_sheet(data, datetime.now())
+    collect_to_sheet({}, {})
+

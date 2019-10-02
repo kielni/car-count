@@ -37,4 +37,41 @@ Share Google Sheet with service account (user@domain.iam.gserviceaccount.com)
 
 ## deploy
 
-`sls deploy`
+everything (if config changes): `sls deploy`
+
+function changes only: `serverless deploy function -f collect-sheet`
+
+test: `serverless invoke -f collect-sheet --log`
+
+## cost
+
+### AWS Lambda
+
+for running the function that collects and saves data
+
+68 invocations / day
+average invocation time of 7 seconds = 476 seconds/day
+128MB configured = 59.5 GB/s/day or about 1,785 GB-seconds/month
+
+[Free tier](https://aws.amazon.com/lambda/pricing/) includes 400,000 GB-seconds/month
+
+### AWS SNS
+
+for sending email and text message alerts
+
+up to 3 alerts/day, 1-2 times/week
+
+#### email
+
+3 subscribers
+
+[first 1,000 email deliveries are free]((https://aws.amazon.com/sns/pricing/))
+
+#### SMS
+
+3 subscribers
+
+outbound messages are [$0.00645/each](https://aws.amazon.com/sns/sms-pricing/)
+
+high estimate: 3 subscribers * 3 alerts per day * 2 alerts/week * 4 weeks/month = $0.46 / month
+
