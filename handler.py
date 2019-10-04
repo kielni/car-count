@@ -7,13 +7,10 @@ import boto3
 from dateutil import tz
 from dateutil import parser as date_parser
 import gspread
-import keen
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
 import xmltodict
 
-
-COLLECTION = 'traffic'
 
 """
     Get data from SNAPS for 15 minute period from 20 minutes ago to 5 minutes ago,
@@ -31,7 +28,9 @@ COLLECTION = 'traffic'
 """
 
 
-SNAPS_URL = 'https://satts11.sensysnetworks.net/snaps/dataservice/stats.xml?userName={username}&password={password}&startTime={start_ts}&period={period}&locationGroup={station}'
+SNAPS_URL = 'https://satts11.sensysnetworks.net/snaps/dataservice/stats.xml?' + \
+            'userName={username}&password={password}&startTime={start_ts}&period={period}&' + \
+            'locationGroup={station}'
 
 
 def get_param(name):
@@ -170,9 +169,9 @@ def update_sheet(values: dict, now_pt: datetime):
     else:
         # add row with date and total
         print('prediction: inserting row=2: %s' % (val))
-        sheet.insert_row([
-            mdy, '=VLOOKUP(A2, EntryA!A:B, 2, FALSE)',
-            prediction['actual'], prediction['predicted']],
+        sheet.insert_row(
+            [mdy, '=VLOOKUP(A2, EntryA!A:B, 2, FALSE)',
+             prediction['actual'], prediction['predicted']],
             index=2, value_input_option='USER_ENTERED')
 
 
@@ -196,7 +195,6 @@ def collect_to_sheet(event, context):
         print(now_pt, ' outside data collection range')
         return
     # predictions M-F at 4pm and 5pm, M-W at 1pm
-    alert = {}
     predict = False
     if now_pt.weekday() < 5 and now_pt.minute < 15:
         predict = now_pt.hour in [16, 17]
@@ -246,86 +244,5 @@ def collect_to_sheet(event, context):
     update_sheet(values, now_pt)
 
 
-def collect(event, context):
-    keen.project_id = get_param('KEEN_PROJECT_ID')
-    keen.write_key = get_param('KEEN_WRITE_KEY')
-    keen.read_key = get_param('KEEN_READ_KEY')
-    print('event=', event)
-
-    # the same rule can be triggered more than once for a single event or scheduled time
-    # https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/CWE_Troubleshooting.html#RuleTriggeredMoreThanOnce
-    if keen.count(COLLECTION, timeframe='this_10_minutes'):
-        print('ERROR: duplicate invocation; event=', event)
-        return
-
-    # UTC
-    start = datetime.now() - timedelta(minutes=20)
-    start.replace(second=0, microsecond=0)
-    start_ts = int(time.mktime(start.timetuple()))
-    # 15 minutes in seconds
-    period = 15 * 60
-    # start of Pacfic time day
-    now_pt = datetime.now(tz.gettz('America/Los_Angeles'))
-    day_start = datetime.now(tz.gettz('America/Los_Angeles'))
-    day_start = day_start.replace(hour=0, minute=0, second=0)
-    day_start_ts = int(time.mktime(day_start.astimezone(tz.gettz('UTC')).timetuple()))
-    # seconds between start of day and 5 minutes ago
-    day_period = now_pt.hour*3600 + now_pt.minute*60 + now_pt.second - 5*60
-    values = {
-        'startTime': start_ts,
-        'period': period,
-        'time': datetime.now(tz.gettz('America/Los_Angeles')).strftime('%H%M%S'),
-    }
-
-    # predictions M-F at 4pm and 5pm, M-W at 1pm
-    alert = {}
-    predict = False
-    if now_pt.weekday() < 5 and now_pt.minute < 15:
-        predict = now_pt.hour in [16, 17]
-        # 1pm prediction on Mon-Wed (0-2)
-        if now_pt.hour == 13 and now_pt.weekday() in [0, 1, 2]:
-            predict = True
-    alert_key = 'EntryA'
-
-    # get data from SNAPS
-    stations = json.loads(os.environ['STATIONS'])
-    for station_type in stations:
-        # 15 minutes of data starting 20 minutes ago
-        values[station_type] = get_counts(stations[station_type], start_ts, period)
-        if not predict:
-            print('skipping prediction: hour=%s weekday=%s minute=%s' % (
-                now_pt.hour, now_pt.weekday(), now_pt.minute))
-            continue
-        # get full day counts up to 5 minutes ago
-        day = get_counts(stations[station_type], day_start_ts, day_period)
-        print('hour=%s start=%s period=%s full day=%s' % (
-            now_pt.hour, day_start_ts, day_period, day))
-        if alert_key not in day:
-            print('no data for %s: %s', (alert_key, day))
-            continue
-        if day[alert_key] < 150:
-            print('actual %s; not a school day' % day[alert_key])
-            continue
-        predicted = _prediction(now_pt, day[alert_key])
-        if not predicted:
-            print('no prediction available for %s %s' % (now_pt.hour, day))
-            continue
-        alert = {
-            'key': alert_key,
-            'actual': day[alert_key],
-            'predicted': predicted
-        }
-        values[station_type]['prediction'] = {
-            'time': now_pt.strftime('%-I%p').lower(),
-            'actual': day[alert_key],
-            'predicted': predicted
-        }
-    # send to Keen
-    print('values=%s' % values)
-    keen.add_event(COLLECTION, values)
-    send_alert(alert, now_pt)
-
-
 if __name__ == '__main__':
     collect_to_sheet({}, {})
-

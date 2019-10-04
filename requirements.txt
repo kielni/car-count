@@ -1,5 +1,4 @@
 python-dateutil==2.6.1
-keen==0.5.1
 xmltodict==0.11.0
 requests==2.22.0
 oauth2client==4.1.3
