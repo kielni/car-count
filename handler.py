@@ -103,28 +103,41 @@ def _prediction(now_pt: int, observed: int) -> int:
     return 401 if observed >= by_day[weekday] else 0
 
 
-def send_alert(alert: dict, now_pt: datetime):
+def send_alert(values: dict, now_pt: datetime, send=True):
+    """send alert if high traffic expected
+
+    values is {'actual': 250, 'predicted': 299}
+    pass in now_pt so it can be overridden to test
+    """
     # send alert if > 400
-    if alert.get('predicted', 0) <= 400:
+    if values.get('predicted', 0) <= 400:
         return
     # early prediction: high or not
+    time_str = now_pt.strftime('%-I:%M%p')
     if now_pt.hour == 13:
-        subject = 'WARNING: high car count predicted as of %s' % (
-            alert['key'])
+        subject = 'WARNING: high car count predicted as of %s' % (time_str)
         message = 'WARNING: %s cars measured at %s as of %s. Over 400 entries predicted.' % (
-            alert['actual'], alert['key'], now_pt.strftime('%-I:%M%p'))
+            values['actual'], values['key'], time_str)
     else:
         subject = 'WARNING: high car count: %s predicted as of %s' % (
-            alert['predicted'], alert['key'])
-        message = 'WARNING: %s cars measured at %s as of %s. %s cars predicted.' % (
-            alert['actual'], alert['key'], now_pt.strftime('%-I:%M%p'),
-            alert['predicted'])
-    print(boto3.client('sns').publish(
-        TopicArn=os.environ['ALERT_ARN'],
-        Message=message, Subject=subject))
+            values['predicted'], time_str)
+        message = 'WARNING: %s cars measured as of %s. %s cars predicted.' % (
+            values['actual'], time_str, values['predicted'])
+    if send:
+        print(boto3.client('sns').publish(
+            TopicArn=os.environ['ALERT_ARN'],
+            Message=message, Subject=subject))
+    else:
+        print('alert:\n\t%s\n\t%s' % (subject, message))
 
 
-def update_sheet(values: dict, now_pt: datetime):
+def update_sheet(values: dict, now_pt: datetime, write: bool):
+    """
+    update sheet with measured values
+    values looks like {
+        'entry': {'EntryA': 0, 'EntryB': 0, 'prediction': {'actual': 250, 'predicted': 299}},
+        'exit': {'ExitA': 0, 'ExitB': 0}}
+    """
     # setup sheet
     scope = ['https://spreadsheets.google.com/feeds',
              'https://www.googleapis.com/auth/drive']
@@ -147,39 +160,58 @@ def update_sheet(values: dict, now_pt: datetime):
             # row for this day already exists; update cell
             cell = '%s%s2' % (prefix[int(col / 26)], chr(65 + col % 26))
             print('%s: updating %s = %s' % (sheet.title, cell, val))
-            sheet.update_acell(cell, val)
+            if write:
+                sheet.update_acell(cell, val)
+            else:
+                print('dry run:\tupdate cell %s = %s' % (cell, val))
         else:
             # add row with date and total
             print('%s: inserting %s %s' % (sheet.title, mdy, val))
             row = [mdy, '=sum(c2:bf2)'] + ['']*56
             row[col] = val
-            sheet.insert_row(row, index=2, value_input_option='USER_ENTERED')
+            if write:
+                sheet.insert_row(row, index=2, value_input_option='USER_ENTERED')
+            else:
+                print('dry run:\tinsert row: %s' % row)
 
-    # use EntryA for predictions
-    # time, actual, predicted
-    prediction = values.get('EntryA', {}).get('prediction')
+    # prediction': {'actual': 250, 'predicted': 299}
+    # without predicted at end of day
+    prediction = values['entry'].get('prediction', {})
     if not prediction:
         print('no prediction')
         return
+    # end of day has actual but not predicted; save only if it's high
+    if 'predicted' not in prediction and prediction['actual'] < 400:
+        print('end of day low (%s); not writing to prediction sheet' % prediction['actual'])
+        return
     # A     B      C           D              E           F              G           H
     # date, total, 1pm actual, 1pm predicted, 4pm actual, 4pm predicted, 5pm actual, 5pm predicted
-    hour_col = {1: ('C', 'D'), 16: ('E', 'F'), 17: ('G', 'H')}
-    col = hour_col.get(now_pt.hour, ('C', 'D'))
+    hour_col = {1: ('C', 'D'), 16: ('E', 'F'), 17: ('G', 'H'), 18: ('B', None)}
+    col = hour_col.get(now_pt.hour, None)
+    if not col:
+        print('invalid hour for prediction sheet: %s' % now_pt.hour)
+        return
     sheet = ss.get_worksheet(worksheets['prediction'])
     latest = date_parser.parse(sheet.range('A2:A2')[0].value).date()
-    if now_pt.date() == latest:
-        # row for this day already exists; update cell
-        print('prediction: updating row=2 col=%s: actual=%s predicted=%s' % (
-            col, prediction['actual'], prediction['predicted']))
+    if now_pt.date() != latest:
+        # add row with date and total
+        print('prediction: inserting row=2: %s' % (val))
+        row = [mdy, '=VLOOKUP(A2, EntryA!A:B, 2, FALSE)']
+        if write:
+            sheet.insert_row(row, index=2, value_input_option='USER_ENTERED')
+        else:
+            print('dry run:\tprediction insert row: %s' % row)
+    if 'predicted' not in prediction:
+        return
+    # row for this day already exists; update cell
+    print('prediction: updating row=2 col=%s: actual=%s predicted=%s' % (
+        col, prediction['actual'], prediction['predicted']))
+    if write:
         sheet.update_acell('%s2' % col[0], prediction['actual'])
         sheet.update_acell('%s2' % col[1], prediction['predicted'])
     else:
-        # add row with date and total
-        print('prediction: inserting row=2: %s' % (val))
-        sheet.insert_row(
-            [mdy, '=VLOOKUP(A2, EntryA!A:B, 2, FALSE)',
-             prediction['actual'], prediction['predicted']],
-            index=2, value_input_option='USER_ENTERED')
+        print('dry run:\tprediction update %s2 = %s' % (col[0], prediction['actual']))
+        print('dry run:\tprediction update %s2 = %s' % (col[1], prediction['predicted']))
 
 
 def collect_to_sheet(event, context):
@@ -214,6 +246,7 @@ def collect_to_sheet(event, context):
         # 1pm prediction on Mon-Wed (0-2)
         if now_pt.hour == 13 and now_pt.weekday() in [0, 1, 2]:
             predict = True
+    full_day = now_pt.hour > 17
     alert_key = 'EntryA'
 
     # get data from SNAPS
@@ -222,50 +255,42 @@ def collect_to_sheet(event, context):
         'period': period,
         'time': datetime.now(tz.gettz('America/Los_Angeles')).strftime('%H%M%S'),
     }
-    alert = {}
     stations = json.loads(os.environ['STATIONS'])
     for station_type in stations:
         print('\nstation %s' % station_type)
         # 15 minutes of data starting 20 minutes ago
         values[station_type] = get_counts(stations[station_type], start_ts, period)
-        if not predict:
+        if not predict and not full_day:
             print('skipping prediction: hour=%s weekday=%s minute=%s' % (
                 now_pt.hour, now_pt.weekday(), now_pt.minute))
             continue
         # get full day counts up to 5 minutes ago
         day = get_counts(stations[station_type], day_start_ts, day_period)
-        print('hour=%s start=%s period=%s full day=%s' % (
-            now_pt.hour, day_start_ts, day_period, day))
+        print('hour=%s start=%s (%s) period=%s full day=%s' % (
+            now_pt.hour, day_start_ts, datetime.fromtimestamp(day_start_ts), day_period, day))
         if alert_key not in day:
             print('no data for %s: %s' % (alert_key, day))
             continue
         if day[alert_key] < 150:
             print('actual %s; not a school day' % day[alert_key])
             continue
-        predicted = _prediction(now_pt, day[alert_key])
-        if not predicted:
-            print('no prediction available for %s %s' % (now_pt.hour, day))
-            continue
-        alert = {
-            'key': alert_key,
-            'actual': day[alert_key],
-            'predicted': predicted
-        }
         values[station_type]['prediction'] = {
             'actual': day[alert_key],
-            'predicted': predicted
         }
-    # send to sheet
-    if event.get('write', True):
-        update_sheet(values, now_pt)
-    else:
-        print('skipping write: values=%s' % values)
-    if event.get('alert', True):
-        send_alert(alert, now_pt)
-    else:
-        print('skipping alert: alert=%s' % alert)
+        if not predict:
+            continue
+        predicted = _prediction(now_pt, day[alert_key])
+        print('predicted=%s' % predicted)
+        if predicted:
+            values[station_type]['prediction']['predicted'] = predicted
+        else:
+            print('no prediction available for %s %s' % (now_pt.hour, day))
 
+    # send to sheet
+    print('\nvalues=%s' % values)
+    update_sheet(values, now_pt, event.get('write', True))
+    send_alert(values.get('entry', {}).get('prediction', {}), now_pt, event.get('alert', True))
 
 
 if __name__ == '__main__':
-    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-04 16:10'}, {})
+    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-02 18:10'}, {})
