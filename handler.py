@@ -9,6 +9,7 @@ from dateutil import parser as date_parser
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
+import urllib3
 import xmltodict
 
 
@@ -28,6 +29,8 @@ import xmltodict
 """
 
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 SNAPS_URL = 'https://satts11.sensysnetworks.net/snaps/dataservice/stats.xml?' + \
             'userName={username}&password={password}&startTime={start_ts}&period={period}&' + \
             'locationGroup={station}'
@@ -42,10 +45,13 @@ def get_param(name):
 def get_counts(station, start_ts, period):
     url = SNAPS_URL.format(username=get_param('SNAPS_USERNAME'),
                            password=get_param('SNAPS_PASSWORD'),
-                           start_ts=start_ts, period=period,
+                           start_ts=start_ts,
+                           period=period,
                            station=station)
     resp = requests.get(url, verify=False)
+    print('url=%s' % url)
     data = xmltodict.parse(resp.text)
+    print('data=%s' % data)
     if 'statistics' not in data:
         print('error: bad data: %s' % data)
         # notify once an hour during school hours
@@ -62,6 +68,7 @@ def get_counts(station, start_ts, period):
     for lane in data['statistics']['approach']['lanes']['lane']:
         name = lane['@name']
         values[name] = int(lane['stat']['@volume'])
+        print('lane %s %s values=%s' % (name, int(lane['stat']['@volume']), values))
     print('station=%s startTime=%s period=%s values=%s' % (station, start_ts, period, values))
     return values
 
@@ -183,8 +190,14 @@ def collect_to_sheet(event, context):
     # 15 minutes in seconds
     period = 15 * 60
     # start of Pacfic time day
-    now_pt = datetime.now(tz.gettz('America/Los_Angeles'))
-    day_start = datetime.now(tz.gettz('America/Los_Angeles'))
+    pt_tz = tz.gettz('America/Los_Angeles')
+    if event.get('dt', None):
+        now_pt = date_parser.parse(event['dt']).replace(tzinfo=pt_tz)
+        day_start = date_parser.parse(event['dt']).replace(tzinfo=pt_tz)
+        print('running for %s' % now_pt)
+    else:
+        now_pt = datetime.now(pt_tz)
+        day_start = datetime.now(pt_tz)
     day_start = day_start.replace(hour=0, minute=0, second=0)
     day_start_ts = int(time.mktime(day_start.astimezone(tz.gettz('UTC')).timetuple()))
     # seconds between start of day and 5 minutes ago
@@ -209,8 +222,10 @@ def collect_to_sheet(event, context):
         'period': period,
         'time': datetime.now(tz.gettz('America/Los_Angeles')).strftime('%H%M%S'),
     }
+    alert = {}
     stations = json.loads(os.environ['STATIONS'])
     for station_type in stations:
+        print('\nstation %s' % station_type)
         # 15 minutes of data starting 20 minutes ago
         values[station_type] = get_counts(stations[station_type], start_ts, period)
         if not predict:
@@ -222,7 +237,7 @@ def collect_to_sheet(event, context):
         print('hour=%s start=%s period=%s full day=%s' % (
             now_pt.hour, day_start_ts, day_period, day))
         if alert_key not in day:
-            print('no data for %s: %s', (alert_key, day))
+            print('no data for %s: %s' % (alert_key, day))
             continue
         if day[alert_key] < 150:
             print('actual %s; not a school day' % day[alert_key])
@@ -241,8 +256,16 @@ def collect_to_sheet(event, context):
             'predicted': predicted
         }
     # send to sheet
-    update_sheet(values, now_pt)
+    if event.get('write', True):
+        update_sheet(values, now_pt)
+    else:
+        print('skipping write: values=%s' % values)
+    if event.get('alert', True):
+        send_alert(alert, now_pt)
+    else:
+        print('skipping alert: alert=%s' % alert)
+
 
 
 if __name__ == '__main__':
-    collect_to_sheet({}, {})
+    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-04 16:10'}, {})
