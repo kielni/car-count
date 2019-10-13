@@ -65,13 +65,36 @@ def get_counts(station, start_ts, period):
         return {}
 
     values = {}
+    print('start: empty values=%s' % values)
     for lane in data['statistics']['approach']['lanes']['lane']:
         name = lane['@name']
         values[name] = int(lane['stat']['@volume'])
-        print('lane %s %s values=%s' % (name, int(lane['stat']['@volume']), values))
+        print('lane %s=%s values=%s values[%s]=%s' % (
+            name, int(lane['stat']['@volume']), values, name, values[name]))
     print('station=%s startTime=%s period=%s values=%s' % (station, start_ts, period, values))
     return values
 
+
+def get_spreadsheet():
+    scope = ['https://spreadsheets.google.com/feeds',
+             'https://www.googleapis.com/auth/drive']
+    creds = json.loads(get_param('hillbrook-traffic-service-account'))
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+    client = gspread.authorize(credentials)
+    return client.open_by_key(os.environ['GOOGLE_SHEET_ID'])
+
+
+def full_day_from_sheet(sheet_name: str, as_of: datetime):
+    ss = get_spreadsheet()
+    sheet = ss.worksheet(sheet_name)
+    # column B for row matching date
+    dt_cell = sheet.find(as_of.strftime('%m/%d/%y'))
+    if not dt_cell:
+        return -1
+    # 4 per hour starting at 5am, plus 2 for date and total
+    max_col = (as_of.hour - 5) * 4 + int(as_of.minute / 15) + 2
+    values = sheet.row_values(dt_cell.row)[2:max_col]
+    return sum([int(v) for v in values])
 
 
 def _prediction(now_pt: int, observed: int) -> int:
@@ -139,13 +162,7 @@ def update_sheet(values: dict, now_pt: datetime, write: bool):
         'exit': {'ExitA': 0, 'ExitB': 0}}
     """
     # setup sheet
-    scope = ['https://spreadsheets.google.com/feeds',
-             'https://www.googleapis.com/auth/drive']
-    creds = json.loads(get_param('hillbrook-traffic-service-account'))
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
-    client = gspread.authorize(credentials)
-    ss = client.open_by_key(os.environ['GOOGLE_SHEET_ID'])
-
+    ss = get_spreadsheet()
     # 4 per hour starting at 5am, plus 2 for date and total
     col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
     # sheets: display, prediction, EntryA, EntryB
@@ -265,21 +282,25 @@ def collect_to_sheet(event, context):
                 now_pt.hour, now_pt.weekday(), now_pt.minute))
             continue
         # get full day counts up to 5 minutes ago
+        # this seems to be unreliable, often returning -1
         day = get_counts(stations[station_type], day_start_ts, day_period)
         print('hour=%s start=%s (%s) period=%s full day=%s' % (
             now_pt.hour, day_start_ts, datetime.fromtimestamp(day_start_ts), day_period, day))
-        if alert_key not in day:
-            print('no data for %s: %s' % (alert_key, day))
-            continue
-        if day[alert_key] < 150:
-            print('actual %s; not a school day' % day[alert_key])
+        day_count = day.get(alert_key, -1)
+        if day_count < 0:
+            print('bad data for full day: %s = %s' % (alert_key, day))
+            # try to get from sheet
+            day_count = full_day_from_sheet(alert_key, now_pt) or -1
+            print('full day count from sheet = %s' % day_count)
+        if day_count < 150:
+            print('actual %s; not a school day' % day_count)
             continue
         values[station_type]['prediction'] = {
-            'actual': day[alert_key],
+            'actual': day_count,
         }
         if not predict:
             continue
-        predicted = _prediction(now_pt, day[alert_key])
+        predicted = _prediction(now_pt, day_count)
         print('predicted=%s' % predicted)
         if predicted:
             values[station_type]['prediction']['predicted'] = predicted
@@ -293,4 +314,4 @@ def collect_to_sheet(event, context):
 
 
 if __name__ == '__main__':
-    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-02 18:10'}, {})
+    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-10 17:10'}, {})
