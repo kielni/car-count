@@ -56,11 +56,13 @@ def get_counts(station, start_ts, period):
         print('error: bad data: %s' % data)
         # notify once an hour during school hours
         now_pt = datetime.now(tz.gettz('America/Los_Angeles'))
-        if now_pt.minute < 15 and now_pt.hour >= 7 and now_pt.hour <= 17:
+        if now_pt.weekday() < 5 and now_pt.minute < 15 and now_pt.hour >= 7 and now_pt.hour <= 17:
             print(boto3.client('sns').publish(
                 TopicArn=os.environ['ALERT_ARN'],
                 Message='received bad data from SNAPS:\n\n%s' % resp.text,
                 Subject='error loading traffic data'))
+        else:
+            print('skipping error alert: outside of alert range', now_pt)
 
         return {}
 
@@ -139,8 +141,8 @@ def send_alert(values: dict, now_pt: datetime, send=True):
     time_str = now_pt.strftime('%-I:%M%p')
     if now_pt.hour == 13:
         subject = 'WARNING: high car count predicted as of %s' % (time_str)
-        message = 'WARNING: %s cars measured at %s as of %s. Over 400 entries predicted.' % (
-            values['actual'], values['key'], time_str)
+        message = 'WARNING: %s cars measured as of %s. Over 400 entries predicted.' % (
+            values['actual'], time_str)
     else:
         subject = 'WARNING: high car count: %s predicted as of %s' % (
             values['predicted'], time_str)
