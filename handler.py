@@ -43,13 +43,13 @@ def get_param(name):
 
 
 def get_counts(station, start_ts, period):
+    print('request %s for station %s' % (SNAPS_URL, station))
     url = SNAPS_URL.format(username=get_param('SNAPS_USERNAME'),
                            password=get_param('SNAPS_PASSWORD'),
                            start_ts=start_ts,
                            period=period,
                            station=station)
     resp = requests.get(url, verify=False)
-    print('url=%s' % url)
     data = xmltodict.parse(resp.text)
     print('data=%s' % data)
     if 'statistics' not in data:
@@ -168,13 +168,14 @@ def update_sheet(values: dict, now_pt: datetime, write: bool):
     # 4 per hour starting at 5am, plus 2 for date and total
     col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
     # sheets: display, prediction, EntryA, EntryB
-    worksheets = {'EntryA': 2, 'EntryB': 3, 'prediction': 1}
+    worksheets = {'prediction': 1, 'EntryA': 2, 'EntryB': 3, 'ExitA': 4, 'ExitB': 5}
     mdy = now_pt.strftime('%-m/%-d/%y')
     prefix = {0: '', 1: 'A', 2: 'B'} # A-Z, AA-AZ, BA-BZ
-    for key in ['EntryA', 'EntryB']:
-        val = max(0, values['entry'][key])
+    for key in ['EntryA', 'EntryB', 'ExitA', 'ExitB']:
+        val = max(0, values['entry' if 'Entry' in key else 'exit'][key])
         sheet = ss.get_worksheet(worksheets[key])
-        latest = date_parser.parse(sheet.range('A2:A2')[0].value).date()
+        dt_str = sheet.range('A2:A2')[0].value or datetime.now().strftime('%m/%d/%Y')
+        latest = date_parser.parse(dt_str).date()
         if now_pt.date() == latest:
             # row for this day already exists; update cell
             cell = '%s%s2' % (prefix[int(col / 26)], chr(65 + col % 26))
@@ -316,4 +317,4 @@ def collect_to_sheet(event, context):
 
 
 if __name__ == '__main__':
-    collect_to_sheet({'write': False, 'alert': False, 'dt': '2019-10-10 17:10'}, {})
+    collect_to_sheet({'write': False, 'alert': False, 'dt': '2020-09-18 15:10'}, {})
