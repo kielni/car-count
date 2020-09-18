@@ -2,7 +2,7 @@
 
 AWS Lambda function runs at 10, 25, 40, and 55 past the hour to
 get data from SNAPS for 15 minute period from 20 minutes ago to 5 minutes ago
-and send to [Keen.io](https://keen.io/) `traffic` collection. 
+and send to a Google Sheet.
 
 At 4pm and 5pm, get prediction for the whole day using linear regression over
 data from Aug 2018 - Sep 2019. If predicted is greater than 400, send alert via SNS.
