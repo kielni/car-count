@@ -28,7 +28,6 @@ provider:
 
   environment:
     STATIONS: ${env:STATIONS}
-    CALENDAR_URL: ${env:CALENDAR_URL}
     ALERT_ARN: ${env:ALERT_ARN}
     GOOGLE_SHEET_ID: ${env:GOOGLE_SHEET_ID}
 
