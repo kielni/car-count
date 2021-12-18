@@ -225,8 +225,8 @@ def update_sheet(values: Dict[str, Dict[str, Any]], now_pt: datetime, write: boo
     ss = get_spreadsheet()
     # 4 per hour starting at 5am, plus 2 for date and total
     col = (now_pt.hour - 5) * 4 + int(now_pt.minute / 15) + 2
-    # sheets: display, prediction, EntryA, EntryB, ExitA, ExitB
-    worksheets = {"prediction": 1, "EntryA": 2, "EntryB": 3, "ExitA": 4, "ExitB": 5}
+    # sheets: display Exit, display Entry, prediction, EntryA, EntryB, ExitA, ExitB
+    worksheets = {"prediction": 2, "EntryA": 3, "EntryB": 4, "ExitA": 5, "ExitB": 6}
     mdy = now_pt.strftime("%-m/%-d/%y")
     prefix = {0: "", 1: "A", 2: "B"}  # A-Z, AA-AZ, BA-BZ
     for key in ["EntryA", "EntryB", "ExitA", "ExitB"]:
