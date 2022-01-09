@@ -230,7 +230,11 @@ def update_sheet(values: Dict[str, Dict[str, Any]], now_pt: datetime, write: boo
     mdy = now_pt.strftime("%-m/%-d/%y")
     prefix = {0: "", 1: "A", 2: "B"}  # A-Z, AA-AZ, BA-BZ
     for key in ["EntryA", "EntryB", "ExitA", "ExitB"]:
-        val = max(0, values["entry" if "Entry" in key else "exit"].get(key, 0))
+        value_key = "entry" if "Entry" in key else "exit"
+        if value_key in values:
+            val = max(0, values["entry" if "Entry" in key else "exit"].get(key, 0))
+        else:
+            val = 0
         sheet = ss.get_worksheet(worksheets[key])
         dt_str = sheet.range("A2:A2")[0].value or datetime.now().strftime("%m/%d/%Y")
         latest = date_parser.parse(dt_str).date()
@@ -254,7 +258,7 @@ def update_sheet(values: Dict[str, Dict[str, Any]], now_pt: datetime, write: boo
 
     # prediction': {'actual': 250, 'predicted': 299}
     # without predicted at end of day
-    prediction: Dict[str, int] = values["entry"].get("prediction", {})
+    prediction: Dict[str, int] = values.get("entry", {}).get("prediction", {})
     if not prediction:
         print("no prediction")
         return
